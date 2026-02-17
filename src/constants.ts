@@ -8,6 +8,7 @@
 // ===========================================
 export const GROQ_API_BASE_URL = "https://api.groq.com/openai/v1";
 export const OLLAMA_API_BASE_URL = "http://localhost:11434/v1";
+export const GITHUB_MODELS_API_BASE_URL = "https://models.github.ai/inference";
 
 // ===========================================
 // ADB Key Codes
@@ -79,6 +80,7 @@ export const LONG_PRESS_DURATION_MS = "1000";
 // ===========================================
 export const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o";
+export const DEFAULT_GITHUB_MODEL = "openai/gpt-5-chat";
 export const DEFAULT_BEDROCK_MODEL = "us.meta.llama3-3-70b-instruct-v1:0";
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet";
 export const DEFAULT_OLLAMA_MODEL = "llama3.2";

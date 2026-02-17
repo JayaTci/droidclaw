@@ -42,6 +42,7 @@ import {
   trimMessages,
   parseJsonResponse,
   SYSTEM_PROMPT,
+  COMPACT_SYSTEM_PROMPT,
   type LLMProvider,
   type ChatMessage,
   type ContentPart,
@@ -205,8 +206,10 @@ export async function runAgent(goal: string, maxSteps?: number): Promise<{ succe
   );
 
   // Phase 4A: Multi-turn conversation memory
+  // Use compact prompt for small-context models (e.g. GitHub preview models)
+  const systemPrompt = llm.capabilities.preferCompactPrompt ? COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT;
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
   ];
 
   let prevElements: UIElement[] = [];

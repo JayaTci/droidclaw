@@ -12,6 +12,7 @@ import {
   DEFAULT_STEP_DELAY,
   DEFAULT_GROQ_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_GITHUB_MODEL,
   DEFAULT_BEDROCK_MODEL,
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_MAX_RETRIES,
@@ -57,12 +58,16 @@ export const Config = {
   // Streaming responses
   STREAMING_ENABLED: env("STREAMING_ENABLED", String(DEFAULT_STREAMING_ENABLED)) === "true",
 
-  // LLM Provider: "groq", "openai", "bedrock", "openrouter", or "ollama"
+  // LLM Provider: "groq", "openai", "bedrock", "openrouter", "ollama", or "github"
   LLM_PROVIDER: env("LLM_PROVIDER", "groq"),
 
   // Groq Configuration
   GROQ_API_KEY: env("GROQ_API_KEY"),
   GROQ_MODEL: env("GROQ_MODEL", DEFAULT_GROQ_MODEL),
+
+  // GitHub Models Configuration (GPT-5-chat via GitHub PAT)
+  GITHUB_TOKEN: env("GITHUB_TOKEN"),
+  GITHUB_MODEL: env("GITHUB_MODEL", DEFAULT_GITHUB_MODEL),
 
   // OpenAI Configuration
   OPENAI_API_KEY: env("OPENAI_API_KEY"),
@@ -86,6 +91,7 @@ export const Config = {
     if (provider === "bedrock") return Config.BEDROCK_MODEL;
     if (provider === "openrouter") return Config.OPENROUTER_MODEL;
     if (provider === "ollama") return Config.OLLAMA_MODEL;
+    if (provider === "github") return Config.GITHUB_MODEL;
     return Config.OPENAI_MODEL;
   },
 
@@ -99,6 +105,9 @@ export const Config = {
     }
     if (provider === "openrouter" && !Config.OPENROUTER_API_KEY) {
       throw new Error("OPENROUTER_API_KEY is required when using OpenRouter provider");
+    }
+    if (provider === "github" && !Config.GITHUB_TOKEN) {
+      throw new Error("GITHUB_TOKEN is required when using GitHub Models provider");
     }
     // Bedrock uses AWS credential chain, no explicit validation needed
   },

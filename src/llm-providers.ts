@@ -21,6 +21,7 @@ import { Config } from "./config.js";
 import {
   GROQ_API_BASE_URL,
   OLLAMA_API_BASE_URL,
+  GITHUB_MODELS_API_BASE_URL,
   BEDROCK_ANTHROPIC_MODELS,
   BEDROCK_META_MODELS,
 } from "./constants.js";
@@ -187,6 +188,44 @@ ESCAPE STUCK LOOPS — when stuck, try in this priority order:
 4. Navigate away (back, home) ONLY as an absolute last resort — this loses progress.`;
 
 // ===========================================
+// Compact System Prompt (for small-context models like GitHub preview)
+// ===========================================
+
+export const COMPACT_SYSTEM_PROMPT = `You are an Android Driver Agent. Achieve the user's goal by navigating the Android UI.
+
+You receive: GOAL, FOREGROUND_APP, LAST_ACTION_RESULT, SCREEN_CONTEXT (UI elements with coordinates), SCREEN_CHANGE.
+
+Output ONLY a valid JSON object. Include "think" for your reasoning.
+
+ACTIONS:
+{"action":"tap","coordinates":[x,y],"reason":"..."}
+{"action":"type","coordinates":[x,y],"text":"...","reason":"..."}
+{"action":"scroll","direction":"up|down|left|right","reason":"..."}
+{"action":"back","reason":"..."}
+{"action":"home","reason":"..."}
+{"action":"enter","reason":"..."}
+{"action":"launch","package":"com.example.app","reason":"..."}
+{"action":"clear","reason":"Clear text field"}
+{"action":"longpress","coordinates":[x,y],"reason":"..."}
+{"action":"shell","command":"...","reason":"..."}
+{"action":"wait","reason":"..."}
+{"action":"done","reason":"Task complete"}
+{"action":"submit_message","reason":"Find Send button and tap it"}
+{"action":"find_and_tap","query":"Button Label","reason":"..."}
+{"action":"read_screen","reason":"Scroll and collect all text"}
+
+RULES:
+1. Never tap elements with "enabled":false.
+2. Always include "coordinates" with "type" to focus the correct field.
+3. If SCREEN_CHANGE says unchanged, your last action failed — try something different.
+4. Use "launch" with package name to open apps directly.
+5. In chat apps use "submit_message" not "enter".
+6. Say "done" as soon as the goal is achieved.
+7. NEVER repeat a failing action — change strategy.
+
+Each element in SCREEN_CONTEXT has: text, center:[x,y], action, and optional flags (enabled:false, editable, checked, focused).`;
+
+// ===========================================
 // Chat Message Types (Phase 4A)
 // ===========================================
 
@@ -207,6 +246,8 @@ export interface LLMProvider {
   readonly capabilities: {
     supportsImages: boolean;
     supportsStreaming: boolean;
+    supportsJsonMode: boolean;   // whether response_format: json_object is supported
+    preferCompactPrompt: boolean; // whether to use the shorter COMPACT_SYSTEM_PROMPT
   };
   getDecision(messages: ChatMessage[]): Promise<ActionDecision>;
   getDecisionStream?(messages: ChatMessage[]): AsyncIterable<string>;
@@ -256,7 +297,12 @@ export function trimMessages(
 class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
   private model: string;
-  readonly capabilities: { supportsImages: boolean; supportsStreaming: boolean };
+  readonly capabilities: {
+    supportsImages: boolean;
+    supportsStreaming: boolean;
+    supportsJsonMode: boolean;
+    preferCompactPrompt: boolean;
+  };
 
   constructor() {
     if (Config.LLM_PROVIDER === "groq") {
@@ -265,7 +311,7 @@ class OpenAIProvider implements LLMProvider {
         baseURL: GROQ_API_BASE_URL,
       });
       this.model = Config.GROQ_MODEL;
-      this.capabilities = { supportsImages: false, supportsStreaming: true };
+      this.capabilities = { supportsImages: false, supportsStreaming: true, supportsJsonMode: true, preferCompactPrompt: false };
     } else if (Config.LLM_PROVIDER === "ollama") {
       this.client = new OpenAI({
         apiKey: "ollama", // required by the SDK but ignored by Ollama
@@ -273,11 +319,19 @@ class OpenAIProvider implements LLMProvider {
       });
       this.model = Config.OLLAMA_MODEL;
       // Vision models (llava, llama3.2-vision, etc.) support images
-      this.capabilities = { supportsImages: true, supportsStreaming: true };
+      this.capabilities = { supportsImages: true, supportsStreaming: true, supportsJsonMode: false, preferCompactPrompt: false };
+    } else if (Config.LLM_PROVIDER === "github") {
+      this.client = new OpenAI({
+        apiKey: Config.GITHUB_TOKEN,
+        baseURL: GITHUB_MODELS_API_BASE_URL,
+      });
+      this.model = Config.GITHUB_MODEL;
+      // Preview models on GitHub: no JSON mode, small context → compact prompt
+      this.capabilities = { supportsImages: false, supportsStreaming: true, supportsJsonMode: false, preferCompactPrompt: true };
     } else {
       this.client = new OpenAI({ apiKey: Config.OPENAI_API_KEY });
       this.model = Config.OPENAI_MODEL;
-      this.capabilities = { supportsImages: true, supportsStreaming: true };
+      this.capabilities = { supportsImages: true, supportsStreaming: true, supportsJsonMode: true, preferCompactPrompt: false };
     }
   }
 
@@ -319,7 +373,7 @@ class OpenAIProvider implements LLMProvider {
     const openaiMessages = this.toOpenAIMessages(messages);
     const response = await this.client.chat.completions.create({
       model: this.model,
-      response_format: { type: "json_object" },
+      ...(this.capabilities.supportsJsonMode ? { response_format: { type: "json_object" as const } } : {}),
       messages: openaiMessages,
     });
     return parseJsonResponse(response.choices[0].message.content ?? "{}");
@@ -329,7 +383,7 @@ class OpenAIProvider implements LLMProvider {
     const openaiMessages = this.toOpenAIMessages(messages);
     const stream = await this.client.chat.completions.create({
       model: this.model,
-      response_format: { type: "json_object" },
+      ...(this.capabilities.supportsJsonMode ? { response_format: { type: "json_object" as const } } : {}),
       messages: openaiMessages,
       stream: true,
     });
@@ -372,7 +426,7 @@ const actionDecisionSchema = z.object({
 class OpenRouterProvider implements LLMProvider {
   private openrouter: ReturnType<typeof createOpenRouter>;
   private model: string;
-  readonly capabilities = { supportsImages: true, supportsStreaming: true };
+  readonly capabilities = { supportsImages: true, supportsStreaming: true, supportsJsonMode: false, preferCompactPrompt: false };
 
   constructor() {
     this.openrouter = createOpenRouter({
@@ -448,7 +502,7 @@ class OpenRouterProvider implements LLMProvider {
 class BedrockProvider implements LLMProvider {
   private client: BedrockRuntimeClient;
   private model: string;
-  readonly capabilities: { supportsImages: boolean; supportsStreaming: boolean };
+  readonly capabilities: { supportsImages: boolean; supportsStreaming: boolean; supportsJsonMode: boolean; preferCompactPrompt: boolean };
 
   constructor() {
     this.client = new BedrockRuntimeClient({ region: Config.AWS_REGION });
@@ -457,6 +511,8 @@ class BedrockProvider implements LLMProvider {
     this.capabilities = {
       supportsImages: this.isAnthropicModel(),
       supportsStreaming: true,
+      supportsJsonMode: false,
+      preferCompactPrompt: false,
     };
   }
 
@@ -655,6 +711,6 @@ export function getLlmProvider(): LLMProvider {
   if (Config.LLM_PROVIDER === "openrouter") {
     return new OpenRouterProvider();
   }
-  // OpenAI, Groq, and Ollama all use OpenAI-compatible API
+  // OpenAI, Groq, Ollama, and GitHub Models all use OpenAI-compatible API
   return new OpenAIProvider();
 }
